@@ -8,7 +8,7 @@ const config: {
     truenas_api_key: string;
 } = JSON.parse(readFileSync('./config.json').toString());
 
-const truenas: TrueNas = new TrueNas(config.truenas_url, config.truenas_api_key);
+const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, config.truenas_api_key);
 const app: Express = express();
 
 app.get('/', async (req: Request, res: Response) => {
@@ -17,8 +17,20 @@ app.get('/', async (req: Request, res: Response) => {
     for (const i of ca) {
         html += `<tr><td>${i.name}</td><td>${i.from} - ${i.until}</td><td>${i.fingerprint}</td></tr>`;
     }
-    html += '</tbody></table>';
+    html += '</tbody></table><br/>';
+    html += '<a href="/me">My cert</a>';
     res.send(html);
+});
+
+app.get('/me',async (req: Request, res: Response) => {
+    const fingerprint = req.header('X-SSL-Client-SHA1');
+    const cert = await truenas.getCertByFingerprint(<string> fingerprint);
+
+    res.send(`
+    <b>${cert.name}</b><br/>
+    SHA1 fingerprint: ${cert.fingerprint}<br/>
+    Until: ${cert.until}<br/>
+    Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days`);
 });
 
 app.listen(config.server_port);
