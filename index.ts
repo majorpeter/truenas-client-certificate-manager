@@ -26,12 +26,23 @@ app.get('/me', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
     const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
-    res.send(`
+    let result = `
     <b>${cert.name}</b><br/>
     SHA1 fingerprint: ${cert.fingerprint}<br/>
     Until: ${cert.until}<br/>
     Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days<br/>
-    <form action="/renew" method="post"><button>Renew</button></form>`);
+    <form action="/renew" method="post"><button>Renew</button></form>`;
+
+    const allCerts = await truenas.getAllCert();
+    const matchingCerts = allCerts.filter(c => c.DN == cert.DN && c.id != cert.id);
+    if (matchingCerts.length > 0) {
+        result += 'Matching certs:<ul>'
+        for (const c of matchingCerts) {
+            result += `<li>${c.name}</li>`;
+        }
+        result += '</ul>';
+    }
+    res.send(result);
 });
 
 app.post('/renew', async (req: Request, res: Response) => {

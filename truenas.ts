@@ -27,7 +27,8 @@ export interface Cert {
     digest_algorithm: 'SHA512',
     signedby: {
         id: number
-    }
+    },
+    DN: string
     // not all fields and enum values are declared
 };
 
@@ -126,7 +127,7 @@ export class Connector {
             state: cert.state,
             digest_algorithm: cert.digest_algorithm,
             signedby: cert.signedby.id,
-            san: cert.san,
+            san: cert.san.map(s => s.replace(/^DNS:/, '')), // 'DNS:' prefix has to be stripped
             //cert_extensions: cert.extensions
         };
         // TODO add cert extensions!
