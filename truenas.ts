@@ -32,6 +32,55 @@ export interface Cert {
     // not all fields and enum values are declared
 };
 
+export interface CertificateCreateParams {
+    create_type: 'CERTIFICATE_CREATE_INTERNAL' | 'CERTIFICATE_CREATE_IMPORTED' | 'CERTIFICATE_CREATE_CSR' | 'CERTIFICATE_CREATE_IMPORTED_CSR' | 'CERTIFICATE_CREATE_ACME',
+    name: string,
+    type: number,
+    key_length: number,
+    key_type: 'RSA',
+    lifetime: number,
+    city: string,
+    common: string,
+    country: string,
+    email: string,
+    organization: string,
+    state: string,
+    digest_algorithm: 'SHA512',
+    signedby: number,
+    san: string[],
+    cert_extensions?: {
+        BasicConstraints?: {
+            enabled: boolean,
+            ca?: boolean,
+            path_length?: number | null,
+            extension_critical?: boolean
+        },
+        AuthorityKeyIdentifier?: {
+            enabled: boolean,
+            authority_cert_issuer?: boolean,
+            extension_critical?: boolean
+        },
+        ExtendedKeyUsage?: {
+            enabled: boolean,
+            usages?: string[],
+            extension_critical?: boolean
+        },
+        KeyUsage?: {
+            enabled: boolean,
+            digital_signature?: boolean,
+            content_commitment?: boolean,
+            key_encipherment?: boolean,
+            data_encipherment?: boolean,
+            key_agreement?: boolean,
+            key_cert_sign?: boolean,
+            crl_sign?: boolean,
+            encipher_only?: boolean,
+            decipher_only?: boolean,
+            extension_critical?: boolean
+        }
+    }
+};
+
 export function certRemainingDays(cert: Cert): number {
     const end = new Date(cert.until);
     const now = new Date();
@@ -112,7 +161,7 @@ export class Connector {
 
     // TODO should move to an application layer from connector
     async renewCert(cert: Cert, lifetimeDays: number): Promise<Cert> {
-        let req_data = {
+        let req_data: CertificateCreateParams = {
             create_type: 'CERTIFICATE_CREATE_INTERNAL',
             name: Connector.generateName(cert.name),
             type: cert.type,
@@ -133,8 +182,12 @@ export class Connector {
         // TODO add cert extensions!
 
         const resp = await axios.post(this.api + '/certificate', req_data, {headers: this.auth});
-        const job_id = resp.data;
+        const jobId = resp.data;
 
+        return await this.waitJobDone(jobId);
+    }
+
+    async waitJobDone(jobId: number): Promise<Cert> {
         // I mean they could have added a 'wait-for' option to the API...
         while (true) {
             const get_jobs = await axios.get(this.api + '/core/get_jobs', {headers: this.auth});
@@ -151,11 +204,11 @@ export class Connector {
             }[] = get_jobs.data;
 
             const job = jobs_status.find((job) => {
-                return job.id == job_id
+                return job.id == jobId
             });
 
             if (!job) {
-                throw Error(`Job #${job_id} not found`);
+                throw Error(`Job #${jobId} not found`);
             }
 
             if (job.state == 'RUNNING') {
@@ -171,6 +224,20 @@ export class Connector {
 
             throw Error(`Invalid job state: ${job.state}`);
         }
+    }
+
+    async importCsr(csr: string, cert: Cert, lifetimeDays: number) {
+        let req_data = {
+            create_type: 'CERTIFICATE_CREATE_IMPORTED_CSR',
+            name: Connector.generateName(cert.name) + '_CSR',
+            CSR: csr,
+            privatekey: cert.privatekey
+        };
+
+        const resp = await axios.post(this.api + '/certificate', req_data, {headers: this.auth});
+        const jobId = resp.data;
+
+        return await this.waitJobDone(jobId);
     }
 };
 
