@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from "express";
 import { readFileSync } from "fs";
 import { TrueNas } from "./truenas";
+import { convertCsr } from "./util"
 
 const config: {
     server_port: number;
@@ -49,9 +50,9 @@ app.post('/renew', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
     const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
-    const newCert = await truenas.renewCert(cert, 20);
-    res.contentType('json');
-    res.send(JSON.stringify(newCert, undefined, 4));
+    const csr = await convertCsr(cert);
+    res.contentType('txt');
+    res.send(csr);
 });
 
 app.listen(config.server_port);
