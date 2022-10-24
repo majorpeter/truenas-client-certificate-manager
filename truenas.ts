@@ -226,7 +226,7 @@ export class Connector {
         }
     }
 
-    async importCsr(csr: string, cert: Cert, lifetimeDays: number) {
+    async importCsr(csr: string, cert: Cert): Promise<Cert> {
         let req_data = {
             create_type: 'CERTIFICATE_CREATE_IMPORTED_CSR',
             name: Connector.generateName(cert.name) + '_CSR',
@@ -238,6 +238,46 @@ export class Connector {
         const jobId = resp.data;
 
         return await this.waitJobDone(jobId);
+    }
+
+    async signCsr(csrId: number, caId: number, name: string): Promise<Cert|null> {
+        const req_data = {
+            ca_id: caId,
+            csr_cert_id: csrId,
+            name: name,
+            cert_extensions: {
+              BasicConstraints: {
+                ca: false,
+                enabled: true,
+                extension_critical: true
+              },
+              AuthorityKeyIdentifier: {
+                authority_cert_issuer: true,
+                enabled: true,
+                extension_critical: false
+              },
+              ExtendedKeyUsage: {
+                usages: [
+                    'CLIENT_AUTH'
+                ],
+                enabled: true,
+                extension_critical: true
+              },
+              KeyUsage: {
+                enabled: true,
+                digital_signature: true,
+                key_agreement: true,
+                extension_critical: true
+              }
+            }
+        };
+        const resp = await axios.post(this.api + '/certificateauthority/ca_sign_csr', req_data, {headers: this.auth});
+
+        if (resp.status == 200) {
+            return resp.data;
+        }
+
+        return null;
     }
 };
 

@@ -51,17 +51,27 @@ app.post('/renew', async (req: Request, res: Response) => {
     const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
     const csr = await convertCsr(cert);
-    if (csr) {
-        try {
-            const newCert = await truenas.importCsr(csr, cert, 20);
-            res.contentType('json');
-            res.send(JSON.stringify(newCert, undefined, 4));
-        } catch (e: any) {
-            res.status(500).send(e.toString());
-        }
-    } else {
-        res.sendStatus(500);
+    if (!csr) {
+        res.status(500).send("CSR conversion failed");
+        return;
     }
+
+    let importedCsr: TrueNas.Cert | null = null;
+    try {
+        importedCsr = await truenas.importCsr(csr, cert);
+    } catch (e: any) {
+        res.status(500).send(e.toString());
+    }
+
+    if (!importedCsr) {
+        res.status(500).send("CSR upload failed");
+        return;
+    }
+
+    const signed = await truenas.signCsr(importedCsr.id, cert.signedby.id, importedCsr.name + '_signed');
+
+    res.contentType('json');
+    res.send(JSON.stringify(signed, undefined, 4));
 });
 
 app.listen(config.server_port);
