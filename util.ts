@@ -43,3 +43,22 @@ export async function convertCsr(cert: TrueNas.Cert): Promise<string | null> {
     }
     return csr;
 }
+
+export async function convertPkcs12(cert: TrueNas.Cert) {
+    const dir = await fs.promises.mkdtemp('/tmp/tnscm');
+    let pkcs12: Buffer | null = null;
+    try {
+        const fullchainpath = dir + '/a';
+        const keypath = dir + '/b'; //TODO use stdin instead
+        await fs.promises.writeFile(fullchainpath, cert.certificate);
+        await fs.promises.appendFile(fullchainpath, cert.signedby.certificate);
+        await fs.promises.writeFile(keypath, cert.privatekey);
+        const result = await openssl(['pkcs12', '-in', fullchainpath, '-inkey', keypath, '-export', '-passout', 'pass:']);
+        pkcs12 = result.data;
+    } catch (e: any) {
+        console.log(e);
+    } finally {
+        await fs.promises.rm(dir, {recursive: true});
+    }
+    return pkcs12;
+}

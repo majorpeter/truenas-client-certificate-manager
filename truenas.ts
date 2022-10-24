@@ -26,7 +26,13 @@ export interface Cert {
     organization: string,
     digest_algorithm: 'SHA512',
     signedby: {
-        id: number
+        id: number,
+        certificate: string,
+        name: string,
+        privatekey: string,
+        signed_certificates: number,
+        from: string,
+        until: string
     },
     DN: string
     // not all fields and enum values are declared
@@ -132,7 +138,7 @@ export class Connector {
     /**
      * @param fingerprint SHA1 sum fingerprint of cert, lowercase, no separators
      */
-    async getCertByFingerprint(fingerprint: string): Promise<Cert> {
+     async getCertByFingerprint(fingerprint: string): Promise<Cert> {
         const certs = await this.getAllCert();
         const myCert = certs.find((value) => {
             return value.fingerprint.toLowerCase().replace(/:/g, '') == fingerprint;
@@ -141,6 +147,20 @@ export class Connector {
             return myCert;
         }
         throw new Error('Fingerprint not found');
+    }
+
+    /**
+     * @param id unique identifier of cert
+     */
+    async getCertById(id: number): Promise<Cert> {
+        const certs = await this.getAllCert();
+        const myCert = certs.find((value) => {
+            return value.id == id;
+        });
+        if (myCert) {
+            return myCert;
+        }
+        throw new Error('ID not found');
     }
 
     /**
@@ -177,9 +197,32 @@ export class Connector {
             digest_algorithm: cert.digest_algorithm,
             signedby: cert.signedby.id,
             san: cert.san.map(s => s.replace(/^DNS:/, '')), // 'DNS:' prefix has to be stripped
-            //cert_extensions: cert.extensions
+            cert_extensions: {
+                BasicConstraints: {
+                  ca: false,
+                  enabled: true,
+                  extension_critical: true
+                },
+                AuthorityKeyIdentifier: {
+                  authority_cert_issuer: true,
+                  enabled: true,
+                  extension_critical: false
+                },
+                ExtendedKeyUsage: {
+                  usages: [
+                      'CLIENT_AUTH'
+                  ],
+                  enabled: true,
+                  extension_critical: true
+                },
+                KeyUsage: {
+                  enabled: true,
+                  digital_signature: true,
+                  key_agreement: true,
+                  extension_critical: true
+                }
+            }
         };
-        // TODO add cert extensions!
 
         const resp = await axios.post(this.api + '/certificate', req_data, {headers: this.auth});
         const jobId = resp.data;

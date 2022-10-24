@@ -1,7 +1,7 @@
 import express, { Express, Request, Response } from "express";
 import { readFileSync } from "fs";
 import { TrueNas } from "./truenas";
-import { convertCsr } from "./util"
+import { convertPkcs12 } from "./util"
 
 const config: {
     server_port: number;
@@ -35,43 +35,49 @@ app.get('/me', async (req: Request, res: Response) => {
     <form action="/renew" method="post"><button>Renew</button></form>`;
 
     const allCerts = await truenas.getAllCert();
-    const matchingCerts = allCerts.filter(c => c.DN == cert.DN && c.id != cert.id);
+    const matchingCerts = allCerts.filter(c => c.DN == cert.DN);
     if (matchingCerts.length > 0) {
         result += 'Matching certs:<ul>'
         for (const c of matchingCerts) {
-            result += `<li>${c.name}</li>`;
+            result += `<li><a href="/pkcs12/${c.id}">${c.name}</a></li>`;
         }
         result += '</ul>';
     }
     res.send(result);
 });
 
+app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
+    const fingerprint = req.header('X-SSL-Client-SHA1');
+    const clientCert = await truenas.getCertByFingerprint(<string> fingerprint);
+    const cert = await truenas.getCertById(parseInt(req.params.certId));
+    if (!cert) {
+        res.sendStatus(404);
+        return;
+    }
+    if (cert.DN != clientCert.DN) {
+        // don't let our users get the privkeys of other users
+        res.sendStatus(403);
+        return;
+    }
+
+    const pkcs12 = await convertPkcs12(cert);
+    if (!pkcs12) {
+        res.sendStatus(500);
+        return;
+    }
+
+    res.contentType('application/x-pkcs12');
+    res.setHeader('Content-disposition', `attachment; filename=${cert.name}.pfx`);
+    res.send(pkcs12);
+});
+
 app.post('/renew', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
     const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
-    const csr = await convertCsr(cert);
-    if (!csr) {
-        res.status(500).send("CSR conversion failed");
-        return;
-    }
-
-    let importedCsr: TrueNas.Cert | null = null;
-    try {
-        importedCsr = await truenas.importCsr(csr, cert);
-    } catch (e: any) {
-        res.status(500).send(e.toString());
-    }
-
-    if (!importedCsr) {
-        res.status(500).send("CSR upload failed");
-        return;
-    }
-
-    const signed = await truenas.signCsr(importedCsr.id, cert.signedby.id, importedCsr.name + '_signed');
-
+    const newCert = await truenas.renewCert(cert, 30);
     res.contentType('json');
-    res.send(JSON.stringify(signed, undefined, 4));
+    res.send(JSON.stringify(newCert, undefined, 4));
 });
 
 app.listen(config.server_port);
