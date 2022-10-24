@@ -137,6 +137,7 @@ export class Connector {
 
     /**
      * @param fingerprint SHA1 sum fingerprint of cert, lowercase, no separators
+     * @throws Error when the certificate is not found
      */
      async getCertByFingerprint(fingerprint: string): Promise<Cert> {
         const certs = await this.getAllCert();
@@ -151,6 +152,7 @@ export class Connector {
 
     /**
      * @param id unique identifier of cert
+     * @throws Error when the certificate is not found
      */
     async getCertById(id: number): Promise<Cert> {
         const certs = await this.getAllCert();

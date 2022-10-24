@@ -7,6 +7,7 @@ const config: {
     server_port: number;
     truenas_url: string;
     truenas_api_key: string;
+    cert_lifetime_days: number;
 } = JSON.parse(readFileSync('./config.json').toString());
 
 const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, config.truenas_api_key);
@@ -25,25 +26,32 @@ app.get('/', async (req: Request, res: Response) => {
 
 app.get('/me', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
-    const cert = await truenas.getCertByFingerprint(<string> fingerprint);
+    try {
+        const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
-    let result = `
-    <b>${cert.name}</b><br/>
-    SHA1 fingerprint: ${cert.fingerprint}<br/>
-    Until: ${cert.until}<br/>
-    Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days<br/>
-    <form action="/renew" method="post"><button>Renew</button></form>`;
+        let result = `
+        <b>${cert.name}</b><br/>
+        SHA1 fingerprint: ${cert.fingerprint}<br/>
+        Until: ${cert.until}<br/>
+        Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days<br/>
+        <form action="/renew" method="post"><button>Renew</button></form>`;
 
-    const allCerts = await truenas.getAllCert();
-    const matchingCerts = allCerts.filter(c => c.DN == cert.DN);
-    if (matchingCerts.length > 0) {
-        result += 'Matching certs:<ul>'
-        for (const c of matchingCerts) {
-            result += `<li><a href="/pkcs12/${c.id}">${c.name}</a></li>`;
+        const allCerts = await truenas.getAllCert();
+        const matchingCerts = allCerts.filter(c => c.DN == cert.DN);
+        if (matchingCerts.length > 0) {
+            result += 'Matching certs:<ul>'
+            for (const c of matchingCerts) {
+                result += `<li><a href="/pkcs12/${c.id}">${c.name}</a></li>`;
+            }
+            result += '</ul>';
         }
-        result += '</ul>';
+        res.send(result);
+    } catch (e) {
+        res.status(500);
+        if (e instanceof Error) {
+            res.send((<Error> e).message);
+        }
     }
-    res.send(result);
 });
 
 app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
@@ -75,9 +83,8 @@ app.post('/renew', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
     const cert = await truenas.getCertByFingerprint(<string> fingerprint);
 
-    const newCert = await truenas.renewCert(cert, 30);
-    res.contentType('json');
-    res.send(JSON.stringify(newCert, undefined, 4));
+    const newCert = await truenas.renewCert(cert, config.cert_lifetime_days);
+    res.redirect(`/pkcs12/${newCert.id}`);
 });
 
 app.listen(config.server_port);
