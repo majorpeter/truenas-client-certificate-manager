@@ -26,42 +26,67 @@ app.get('/', async (req: Request, res: Response) => {
 
 app.get('/me', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
+    let cert = null;
     try {
-        const cert = await truenas.getCertByFingerprint(<string> fingerprint);
-
-        let result = `
-        <b>${cert.name}</b><br/>
-        SHA1 fingerprint: ${cert.fingerprint}<br/>
-        Until: ${cert.until}<br/>
-        Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days<br/>
-        <form action="/renew" method="post"><button>Renew</button></form>`;
-
-        const allCerts = await truenas.getAllCert();
-        const matchingCerts = allCerts.filter(c => c.DN == cert.DN);
-        if (matchingCerts.length > 0) {
-            result += 'Matching certs:<ul>'
-            for (const c of matchingCerts) {
-                result += `<li><a href="/pkcs12/${c.id}">${c.name}</a></li>`;
-            }
-            result += '</ul>';
-        }
-        res.send(result);
+        cert = await truenas.getCertByFingerprint(<string> fingerprint);
     } catch (e) {
         res.status(500);
         if (e instanceof Error) {
             res.send((<Error> e).message);
         }
+        return;
+    }
+
+    let result = `
+    <b>${cert.name}</b><br/>
+    SHA1 fingerprint: ${cert.fingerprint}<br/>
+    Until: ${cert.until}<br/>
+    Remaining: ${Math.floor(TrueNas.certRemainingDays(cert))} days<br/>
+    <form action="/renew" method="post"><button>Renew</button></form>`;
+
+    const allCerts = await truenas.getAllCert();
+    const filterDN = cert.DN;
+    const matchingCerts = allCerts.filter(c => c.DN == filterDN);
+    if (matchingCerts.length > 0) {
+        result += 'Matching certs:<table><tbody><tr><th>Name</th><th>Download</th><th>Remaining</th></tr>';
+        for (const c of matchingCerts) {
+            result += `<tr><td>
+                           &bull; ${c.name}
+                        </td><td>
+                           <a href="/pkcs12/${c.id}">pfx</a>
+                        </td><td>
+                            ${Math.floor(TrueNas.certRemainingDays(c))}d
+                        </td></tr>`;
+        }
+        result += '</tbody></table>';
+    }
+    res.send(result);
+});
+
+app.get('/remaining', async (req: Request, res: Response) => {
+    const fingerprint = req.header('X-SSL-Client-SHA1');
+    try {
+        const cert = await truenas.getCertByFingerprint(<string> fingerprint);
+        res.type('txt');
+        res.send(Math.floor(TrueNas.certRemainingDays(cert)).toString());
+    } catch (e) {
+        res.sendStatus(403);
+        return;
     }
 });
 
 app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
     const clientCert = await truenas.getCertByFingerprint(<string> fingerprint);
-    const cert = await truenas.getCertById(parseInt(req.params.certId));
-    if (!cert) {
+
+    let cert = null;
+    try {
+        cert = await truenas.getCertById(parseInt(req.params.certId));
+    } catch (e) {
         res.sendStatus(404);
         return;
     }
+
     if (cert.DN != clientCert.DN) {
         // don't let our users get the privkeys of other users
         res.sendStatus(403);
@@ -81,10 +106,36 @@ app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
 
 app.post('/renew', async (req: Request, res: Response) => {
     const fingerprint = req.header('X-SSL-Client-SHA1');
-    const cert = await truenas.getCertByFingerprint(<string> fingerprint);
+    let cert;
+    try {
+        cert = await truenas.getCertByFingerprint(<string> fingerprint);
+    } catch (e) {
+        res.sendStatus(403);
+        return;
+    }
 
-    const newCert = await truenas.renewCert(cert, config.cert_lifetime_days);
-    res.redirect(`/pkcs12/${newCert.id}`);
+    // check whether we have a newer, not yet installed cert
+    const allCerts = await truenas.getAllCert();
+    const filterDN = cert.DN;
+    const matchingCerts = allCerts.filter(c => c.DN == filterDN).sort((a, b) => b.id - a.id);
+    if (matchingCerts.length > 0) {
+        if (matchingCerts[0].id != cert.id) {
+            // the latest cert issued for this user is newer than currently installed, just return that
+            res.redirect(`/pkcs12/${matchingCerts[0].id}`);
+            return;
+        }
+    }
+
+    // create a new cert
+    try {
+        const newCert = await truenas.renewCert(cert, config.cert_lifetime_days);
+        res.redirect(`/pkcs12/${newCert.id}`);
+    } catch (e) {
+        res.status(500);
+        if (e instanceof Error) {
+            res.send(e.message);
+        }
+    }
 });
 
 app.listen(config.server_port);
