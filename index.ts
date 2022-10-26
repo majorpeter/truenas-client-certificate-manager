@@ -8,7 +8,7 @@ const config: {
     truenas_url: string;
     truenas_api_key: string;
     cert_lifetime_days: number;
-} = JSON.parse(readFileSync('./config.json').toString());
+} = JSON.parse(readFileSync(__dirname + '/config.json').toString());
 
 const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, config.truenas_api_key);
 const app: Express = express();
