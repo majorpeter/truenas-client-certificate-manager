@@ -21,4 +21,4 @@ More information in [NGINX reverse proxy configuration](doc/nginx.md).
 ## Clients
 
 * Linux/Node.js: [truenas-certificate-manager-client-node](https://github.com/majorpeter/truenas-certificate-manager-client-node)
-* Android: TBD
+* Android: [truenas-certificate-manager-client-android](https://github.com/majorpeter/truenas-certificate-manager-client-android)
