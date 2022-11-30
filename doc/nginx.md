@@ -91,3 +91,5 @@ proxy_set_header X-SSL-Client-SHA1 $ssl_client_fingerprint;
 ```
 
 The `return 444;` part is optional in the `server` block.
+
+Hint: `X-Forwarded-Host` is required for QR code login.

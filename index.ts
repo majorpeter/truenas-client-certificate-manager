@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from "express";
 import { readFileSync } from "fs";
 import { QrLoginManager } from "./qrloginmanager";
+import * as QRCode from "qrcode";
 import { TrueNas } from "./truenas";
 import { convertPkcs12 } from "./util"
 
@@ -179,7 +180,18 @@ app.get('/admin', async (req: Request, res: Response) => {
 app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
     if (clientIsAdmin(req)) {
         const url = QrLoginManager.getUrl(`https://${req.header(HEADER_X_FORWARDED_HOST)}/qrcode/`, parseInt(req.params.certId));
-        res.send(`<a href="${url}">${url}</a>`);
+        res.send(`
+        <h1>QR code login</h1>
+        Token: <a href="${url}">${url.split('/').at(-1)}</a><br/>
+        <img src="${await QRCode.toDataURL(url, {
+            scale: 10
+        })}"/>\n
+        <h3>Installation instructions</h3><ul>
+            <li>Scan QR code on phone</li>
+            <li>Open in browser & download PFX file</li>
+            <li>Open file, install as <i>VPN and application user certificate</i>, do not edit name (<i>tnscm</i>)</li>
+            <li>Delete file from phone</li>
+        </ul>`);
     } else {
         res.sendStatus(403);
     }
