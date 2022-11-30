@@ -1,9 +1,11 @@
 import express, { Express, Request, Response } from "express";
 import { readFileSync } from "fs";
+import { QrLoginManager } from "./qrloginmanager";
 import { TrueNas } from "./truenas";
 import { convertPkcs12 } from "./util"
 
-const CLIENT_CERT_FINGERPRINT_HEADER = 'X-SSL-Client-SHA1';
+const HEADER_CLIENT_CERT_FINGERPRINT = 'X-SSL-Client-SHA1';
+const HEADER_X_FORWARDED_HOST = 'X-Forwarded-Host';
 
 const config: {
     server_port: number;
@@ -18,7 +20,7 @@ const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, con
 const app: Express = express();
 
 function clientIsAdmin(req: Request): boolean {
-    return req.header(CLIENT_CERT_FINGERPRINT_HEADER) == config.admin_cert_fingerprint;
+    return req.header(HEADER_CLIENT_CERT_FINGERPRINT) == config.admin_cert_fingerprint;
 }
 
 app.get('/', async (req: Request, res: Response) => {
@@ -38,7 +40,7 @@ app.get('/', async (req: Request, res: Response) => {
 });
 
 app.get('/me', async (req: Request, res: Response) => {
-    const fingerprint = req.header(CLIENT_CERT_FINGERPRINT_HEADER);
+    const fingerprint = req.header(HEADER_CLIENT_CERT_FINGERPRINT);
     let cert = null;
     try {
         cert = await truenas.getCertByFingerprint(<string> fingerprint);
@@ -162,6 +164,7 @@ app.get('/admin', async (req: Request, res: Response) => {
                            &bull; ${c.name}
                         </td><td>
                            <a href="/pkcs12/${c.id}">pfx</a>
+                           <a href="/admin/qrcode/${c.id}">QR</a>
                         </td><td>
                             ${Math.floor(TrueNas.certRemainingDays(c))}d
                         </td></tr>`;
@@ -170,6 +173,34 @@ app.get('/admin', async (req: Request, res: Response) => {
         res.send(result);
     } else {
         res.sendStatus(403);
+    }
+});
+
+app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
+    if (clientIsAdmin(req)) {
+        const url = QrLoginManager.getUrl(`https://${req.header(HEADER_X_FORWARDED_HOST)}/qrcode/`, parseInt(req.params.certId));
+        res.send(`<a href="${url}">${url}</a>`);
+    } else {
+        res.sendStatus(403);
+    }
+});
+
+app.get('/qrcode/:sessionId', async (req: Request, res: Response) => {
+    const certId = QrLoginManager.getCertIdBySession(req.params.sessionId);
+    if (certId) {
+        let cert = await truenas.getCertById(certId);
+
+        const pkcs12 = await convertPkcs12(cert);
+        if (!pkcs12) {
+            res.sendStatus(500);
+            return;
+        }
+
+        res.contentType('application/x-pkcs12');
+        res.setHeader('Content-disposition', `attachment; filename=${cert.name}.pfx`);
+        res.send(pkcs12);
+    } else {
+        res.send(404);
     }
 });
 
