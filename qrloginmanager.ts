@@ -33,10 +33,6 @@ export function getKey(certId: number): string {
     return session.key;
 }
 
-export function getUrl(prefix: string, certId: number) {
-    return prefix + getKey(certId);
-}
-
 export function getCertIdBySession(sessionKey: string): number | null {
     for (const value of sessions) {
         if (value.endOfLife > new Date().getTime()) {
@@ -46,6 +42,17 @@ export function getCertIdBySession(sessionKey: string): number | null {
         }
     }
     return null;
+}
+
+export function getRemainingSessionLifetimeSec(sessionKey: string): number {
+    for (const value of sessions) {
+        if (value.endOfLife > new Date().getTime()) {
+            if (value.key == sessionKey) {
+                return Math.floor((value.endOfLife - new Date().getTime())/1e3);
+            }
+        }
+    }
+    return 0;
 }
 
 function randomString(length: number) {

@@ -179,10 +179,15 @@ app.get('/admin', async (req: Request, res: Response) => {
 
 app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
     if (clientIsAdmin(req)) {
-        const url = QrLoginManager.getUrl(`https://${req.header(HEADER_X_FORWARDED_HOST)}/qrcode/`, parseInt(req.params.certId));
+        const sessionKey = QrLoginManager.getKey(parseInt(req.params.certId));
+        const remainingSec = QrLoginManager.getRemainingSessionLifetimeSec(sessionKey);
+        const url = `https://${req.header(HEADER_X_FORWARDED_HOST)}/qrcode/${sessionKey}`;
+
         res.send(`
         <h1>QR code login</h1>
-        Token: <a href="${url}">${url.split('/').at(-1)}</a><br/>
+        Token: <a href="${url}">${sessionKey}</a><br/>
+        Token lifetime: ${remainingSec} sec<br/>
+
         <img src="${await QRCode.toDataURL(url, {
             scale: 10
         })}"/>\n
@@ -191,7 +196,12 @@ app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
             <li>Open in browser & download PFX file</li>
             <li>Open file, install as <i>VPN and application user certificate</i>, do not edit name (<i>tnscm</i>)</li>
             <li>Delete file from phone</li>
-        </ul>`);
+        </ul>
+        <script type=text/javascript>
+        setTimeout(function() {
+            window.location.reload();
+        }, ${remainingSec + 1} * 1000);
+        </script>`);
     } else {
         res.sendStatus(403);
     }
