@@ -3,15 +3,23 @@ import { readFileSync } from "fs";
 import { TrueNas } from "./truenas";
 import { convertPkcs12 } from "./util"
 
+const CLIENT_CERT_FINGERPRINT_HEADER = 'X-SSL-Client-SHA1';
+
 const config: {
     server_port: number;
     truenas_url: string;
     truenas_api_key: string;
     cert_lifetime_days: number;
+    /// SHA1 sum of lowercase, no separators
+    admin_cert_fingerprint: string;
 } = JSON.parse(readFileSync(__dirname + '/config.json').toString());
 
 const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, config.truenas_api_key);
 const app: Express = express();
+
+function clientIsAdmin(req: Request): boolean {
+    return req.header(CLIENT_CERT_FINGERPRINT_HEADER) == config.admin_cert_fingerprint;
+}
 
 app.get('/', async (req: Request, res: Response) => {
     let html = '<table><tbody><tr><th>Name</th><th>Valid</th><th>Fingerprint</th></tr>';
@@ -21,11 +29,16 @@ app.get('/', async (req: Request, res: Response) => {
     }
     html += '</tbody></table><br/>';
     html += '<a href="/me">My cert</a>';
+
+    if (clientIsAdmin(req)) {
+        html += '\n<a href="/admin">Admin</a>';
+    }
+
     res.send(html);
 });
 
 app.get('/me', async (req: Request, res: Response) => {
-    const fingerprint = req.header('X-SSL-Client-SHA1');
+    const fingerprint = req.header(CLIENT_CERT_FINGERPRINT_HEADER);
     let cert = null;
     try {
         cert = await truenas.getCertByFingerprint(<string> fingerprint);
@@ -76,9 +89,6 @@ app.get('/remaining', async (req: Request, res: Response) => {
 });
 
 app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
-    const fingerprint = req.header('X-SSL-Client-SHA1');
-    const clientCert = await truenas.getCertByFingerprint(<string> fingerprint);
-
     let cert = null;
     try {
         cert = await truenas.getCertById(parseInt(req.params.certId));
@@ -87,10 +97,15 @@ app.get('/pkcs12/:certId',async (req: Request, res: Response) => {
         return;
     }
 
-    if (cert.DN != clientCert.DN) {
-        // don't let our users get the privkeys of other users
-        res.sendStatus(403);
-        return;
+    if (!clientIsAdmin(req)) {
+        const fingerprint = req.header('X-SSL-Client-SHA1');
+        const clientCert = await truenas.getCertByFingerprint(<string> fingerprint);
+
+        if (cert.DN != clientCert.DN) {
+            // don't let our users get the privkeys of other users
+            res.sendStatus(403);
+            return;
+        }
     }
 
     const pkcs12 = await convertPkcs12(cert);
@@ -135,6 +150,26 @@ app.post('/renew', async (req: Request, res: Response) => {
         if (e instanceof Error) {
             res.send(e.message);
         }
+    }
+});
+
+app.get('/admin', async (req: Request, res: Response) => {
+    if (clientIsAdmin(req)) {
+        const allCerts = await truenas.getAllCert();
+        let result = '<h1>All certificates</h1><table><tbody><tr><th>Name</th><th>Download</th><th>Remaining</th></tr>';
+        for (const c of allCerts.sort((a, b) => a.name.localeCompare(b.name))) {
+            result += `<tr><td>
+                           &bull; ${c.name}
+                        </td><td>
+                           <a href="/pkcs12/${c.id}">pfx</a>
+                        </td><td>
+                            ${Math.floor(TrueNas.certRemainingDays(c))}d
+                        </td></tr>`;
+        }
+        result += '</tbody></table>';
+        res.send(result);
+    } else {
+        res.sendStatus(403);
     }
 });
 
