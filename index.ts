@@ -227,3 +227,4 @@ app.get('/qrcode/:sessionId', async (req: Request, res: Response) => {
 });
 
 app.listen(config.server_port);
+console.log(`Listening on port ${config.server_port}...`);
