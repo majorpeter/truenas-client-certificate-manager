@@ -31,6 +31,22 @@ async function clientIsAdmin(req: Request): Promise<boolean> {
     return false;
 }
 
+async function renewCertIfRequired(cert: TrueNas.Cert): Promise<TrueNas.Cert> {
+    // check whether we have a newer, not yet installed cert
+    const allCerts = await truenas.getAllCert();
+    const filterDN = cert.DN;
+    const matchingCerts = allCerts.filter(c => c.DN == filterDN).sort((a, b) => b.id - a.id);
+    if (matchingCerts.length > 0) {
+        if (matchingCerts[0].id != cert.id) {
+            // the latest cert issued for this user is newer than currently installed, just return that
+            return matchingCerts[0];
+        }
+    }
+
+    // create a new cert
+    return truenas.renewCert(cert, config.cert_lifetime_days);
+}
+
 app.get('/', async (req: Request, res: Response) => {
     let html = '<table><tbody><tr><th>Name</th><th>Valid</th><th>Fingerprint</th></tr>';
     const ca = await truenas.getAllCa();
@@ -139,21 +155,8 @@ app.post('/renew', async (req: Request, res: Response) => {
         return;
     }
 
-    // check whether we have a newer, not yet installed cert
-    const allCerts = await truenas.getAllCert();
-    const filterDN = cert.DN;
-    const matchingCerts = allCerts.filter(c => c.DN == filterDN).sort((a, b) => b.id - a.id);
-    if (matchingCerts.length > 0) {
-        if (matchingCerts[0].id != cert.id) {
-            // the latest cert issued for this user is newer than currently installed, just return that
-            res.redirect(`/pkcs12/${matchingCerts[0].id}`);
-            return;
-        }
-    }
-
-    // create a new cert
     try {
-        const newCert = await truenas.renewCert(cert, config.cert_lifetime_days);
+        const newCert = await renewCertIfRequired(cert);
         res.redirect(`/pkcs12/${newCert.id}`);
     } catch (e) {
         res.status(500);
@@ -173,6 +176,7 @@ app.get('/admin', async (req: Request, res: Response) => {
                         </td><td>
                            <a href="/pkcs12/${c.id}">pfx</a>
                            <a href="/admin/qrcode/${c.id}">QR</a>
+                           <a href="/admin/renew/${c.id}">renew</a>
                         </td><td>
                             ${Math.floor(TrueNas.certRemainingDays(c))}d
                         </td></tr>`;
@@ -209,6 +213,23 @@ app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
             window.location.reload();
         }, ${remainingSec + 1} * 1000);
         </script>`);
+    } else {
+        res.sendStatus(403);
+    }
+});
+
+app.get('/admin/renew/:certId',async (req: Request, res: Response) => {
+    if (await clientIsAdmin(req)) {
+        const cert = await truenas.getCertById(parseInt(req.params.certId));
+        try {
+            await renewCertIfRequired(cert);
+            res.redirect('/admin');
+        } catch (e) {
+            res.status(500);
+            if (e instanceof Error) {
+                res.send(e.message);
+            }
+        }
     } else {
         res.sendStatus(403);
     }
