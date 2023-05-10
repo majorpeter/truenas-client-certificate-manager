@@ -14,14 +14,21 @@ const config: {
     truenas_api_key: string;
     cert_lifetime_days: number;
     /// SHA1 sum of lowercase, no separators
-    admin_cert_fingerprint: string;
+    admin_cert_subject_alt_name: string;
 } = JSON.parse(readFileSync(__dirname + '/config.json').toString());
 
 const truenas: TrueNas.Connector = new TrueNas.Connector(config.truenas_url, config.truenas_api_key);
 const app: Express = express();
 
-function clientIsAdmin(req: Request): boolean {
-    return req.header(HEADER_CLIENT_CERT_FINGERPRINT) == config.admin_cert_fingerprint;
+async function clientIsAdmin(req: Request): Promise<boolean> {
+    const fingerprint = req.header(HEADER_CLIENT_CERT_FINGERPRINT);
+    if (fingerprint) {
+        const cert = await truenas.getCertByFingerprint(fingerprint);
+        return cert.san.find((value) => {
+            return value.split(':')[1] == config.admin_cert_subject_alt_name;
+        }) != undefined;
+    }
+    return false;
 }
 
 app.get('/', async (req: Request, res: Response) => {
@@ -33,7 +40,7 @@ app.get('/', async (req: Request, res: Response) => {
     html += '</tbody></table><br/>';
     html += '<a href="/me">My cert</a>';
 
-    if (clientIsAdmin(req)) {
+    if (await clientIsAdmin(req)) {
         html += '\n<a href="/admin">Admin</a>';
     }
 
@@ -157,7 +164,7 @@ app.post('/renew', async (req: Request, res: Response) => {
 });
 
 app.get('/admin', async (req: Request, res: Response) => {
-    if (clientIsAdmin(req)) {
+    if (await clientIsAdmin(req)) {
         const allCerts = await truenas.getAllCert();
         let result = '<h1>All certificates</h1><table><tbody><tr><th>Name</th><th>Download</th><th>Remaining</th></tr>';
         for (const c of allCerts.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -178,7 +185,7 @@ app.get('/admin', async (req: Request, res: Response) => {
 });
 
 app.get('/admin/qrcode/:certId',async (req: Request, res: Response) => {
-    if (clientIsAdmin(req)) {
+    if (await clientIsAdmin(req)) {
         const sessionKey = QrLoginManager.getKey(parseInt(req.params.certId));
         const remainingSec = QrLoginManager.getRemainingSessionLifetimeSec(sessionKey);
         const url = `https://${req.header(HEADER_X_FORWARDED_HOST)}/qrcode/${sessionKey}`;

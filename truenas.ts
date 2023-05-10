@@ -93,6 +93,8 @@ export function certRemainingDays(cert: Cert): number {
     return (+end - +now) / (24 * 3600e3);
 }
 
+var certByFingerprintCache: Map<string, Cert> = new Map();
+
 export class Connector {
     server_url: string;
     api_key: string;
@@ -140,11 +142,16 @@ export class Connector {
      * @throws Error when the certificate is not found
      */
      async getCertByFingerprint(fingerprint: string): Promise<Cert> {
+        if (certByFingerprintCache.has(fingerprint)) {
+            return <Cert> certByFingerprintCache.get(fingerprint);
+        }
+
         const certs = await this.getAllCert();
         const myCert = certs.find((value) => {
             return value.fingerprint.toLowerCase().replace(/:/g, '') == fingerprint;
         });
         if (myCert) {
+            certByFingerprintCache.set(fingerprint, myCert);
             return myCert;
         }
         throw new Error('Fingerprint not found');
